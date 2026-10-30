@@ -143,8 +143,14 @@ footer { color:var(--muted); font-size:0.8rem; }
       <div class="rules-body">
         <h3>Goal</h3>
         <p>Tap, click or press Space to drop the sliding block onto the tower. Anything that hangs over the edge is cut off, so the tower gets narrower the less accurate you are. Miss the tower completely and it is game over.</p>
+        <h3>Coins</h3>
+        <p>In the default Coins theme every block is a coin with its ticker and colour: Nano first, then BTC, ETH, LTC, XMR, SOL, ADA, DOGE, XRP, BNB, DOT and TRX, repeating as you climb. Blocks that get too narrow lose their label. Switch themes under Block themes.</p>
+        <h3>Ranks</h3>
+        <p>Your tower height earns a rank: Paper Hands (0), Hodler (10 layers), Diamond Hands (20), Whale (30) and Satoshi (45).</p>
         <h3>Perfect drops</h3>
         <p>Land a block almost exactly on top of the one below and it snaps into place with nothing cut off. Three perfect drops in a row start growing your block back, up to its starting width.</p>
+        <h3>Bonus growth</h3>
+        <p>Every 5th layer your block grows back by a little (about 2% of the starting width), whether or not you were perfect, up to its starting width.</p>
         <h3>Speed</h3>
         <p>The blocks slide faster as the tower gets taller.</p>
         <h3>Daily</h3>
@@ -174,6 +180,8 @@ footer { color:var(--muted); font-size:0.8rem; }
         <div class="stat"><small>Games played</small><b id="r-games">0</b></div>
         <div class="stat"><small>Total layers</small><b id="r-layers">0</b></div>
         <div class="stat"><small>Perfect drops</small><b id="r-perf">0</b></div>
+        <div class="stat"><small>Best rank</small><b id="r-rank">Paper Hands</b></div>
+        <div class="stat"><small>Longest perfect streak</small><b id="r-bperf">0</b></div>
       </div>
     </section>
 
@@ -228,9 +236,24 @@ footer { color:var(--muted); font-size:0.8rem; }
   const W = 360, H = 560, BH = 26, BASEW = 190, BASEY = H - 70, PERF = 5, DAILY_TARGET = 30;
   const EPOCH = Date.UTC(2026, 9, 30);
   const THEMES = [
-    { id: "classic", name: "Classic", free: true }, { id: "sunset", name: "Sunset", free: true },
+    { id: "coins", name: "Coins", free: true }, { id: "classic", name: "Classic", free: true }, { id: "sunset", name: "Sunset", free: true },
     { id: "gold", name: "Gold" }, { id: "neon", name: "Neon" }, { id: "mint", name: "Mint" }
   ];
+  const COINS = [
+    { t: "XNO", c: "#4a90ff" }, { t: "BTC", c: "#f7931a" }, { t: "ETH", c: "#627eea" }, { t: "LTC", c: "#9aa4b2" },
+    { t: "XMR", c: "#ff6600" }, { t: "SOL", c: "#9945ff" }, { t: "ADA", c: "#2a71d0" }, { t: "DOGE", c: "#c2a633" },
+    { t: "XRP", c: "#5b6b82" }, { t: "BNB", c: "#f3ba2f" }, { t: "DOT", c: "#e6007a" }, { t: "TRX", c: "#eb0029" }
+  ];
+  const RANKS = [
+    { at: 0, n: "Paper Hands" }, { at: 10, n: "Hodler" }, { at: 20, n: "Diamond Hands" }, { at: 30, n: "Whale" }, { at: 45, n: "Satoshi" }
+  ];
+  function coinFor(n) { return COINS[n % COINS.length]; }
+  function rankFor(n) { let r = RANKS[0]; RANKS.forEach(function (x) { if (n >= x.at) r = x; }); return r; }
+  function inkFor(hex) {
+    const v = parseInt(hex.slice(1), 16), r = v >> 16 & 255, g = v >> 8 & 255, b = v & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#101827" : "#ffffff";
+  }
+  function vib(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
   function dateKey(d) { return (d || new Date()).toISOString().slice(0, 10); }
   function prevKey(k) { return dateKey(new Date(Date.parse(k + "T00:00:00Z") - 864e5)); }
   function dayNumber(k) { return Math.max(1, Math.round((Date.parse(k + "T00:00:00Z") - EPOCH) / 864e5) + 1); }
@@ -250,13 +273,13 @@ footer { color:var(--muted); font-size:0.8rem; }
 
   // ---------- storage ----------
   let supporter = lsGet("bs-sup", "0") === "1";
-  let theme = lsGet("bs-theme", "classic");
+  let theme = lsGet("bs-theme", "coins");
   let muted = lsGet("bs-mute", "0") === "1";
   let best = parseInt(lsGet("bs-best", "0"), 10) || 0;
-  const stats = Object.assign({ games: 0, layers: 0, perfects: 0 }, jget("bs-stats", {}));
+  const stats = Object.assign({ games: 0, layers: 0, perfects: 0, bestPerf: 0 }, jget("bs-stats", {}));
   const daily = Object.assign({ last: "", streak: 0, best: 0, cleared: 0 }, jget("bs-daily", {}));
   function themeOk(id) { const t = THEMES.filter(function (x) { return x.id === id; })[0]; return !!t && (t.free || supporter); }
-  if (!themeOk(theme)) theme = "classic";
+  if (!themeOk(theme)) theme = "coins";
   function saveStats() { lsSet("bs-stats", JSON.stringify(stats)); }
   function liveStreak() { const k = dateKey(); return (daily.last === k || daily.last === prevKey(k)) ? daily.streak : 0; }
   function recordDaily(key) {
@@ -290,8 +313,9 @@ footer { color:var(--muted); font-size:0.8rem; }
   // ---------- game ----------
   const cv = $("cv"), ctx = cv.getContext("2d");
   let mode = "free", dailyCfg = null;
-  let state = "ready", blocks = [], cur = null, falling = [], pops = [], cam = 0, score = 0, perfect = 0, speeds = [], clearedThisRun = false, runPerfects = 0, overAt = 0;
+  let state = "ready", blocks = [], cur = null, falling = [], pops = [], flashes = [], cam = 0, score = 0, perfect = 0, speeds = [], clearedThisRun = false, runPerfects = 0, overAt = 0;
   function colorFor(n) {
+    if (theme === "coins") return coinFor(n).c;
     if (theme === "sunset") return "hsl(" + ((350 + n * 6) % 360) + ",80%," + (55 + (n % 4) * 2) + "%)";
     if (theme === "gold") return "hsl(" + (38 + (n * 3) % 16) + ",88%," + (46 + (n % 5) * 3) + "%)";
     if (theme === "neon") return n % 2 ? "hsl(185,100%,58%)" : "hsl(305,100%,62%)";
@@ -308,18 +332,18 @@ footer { color:var(--muted); font-size:0.8rem; }
   function yOf(i) { return BASEY - i * BH; }
   function spawn() {
     const n = blocks.length, top = blocks[n - 1], dir = n % 2 ? 1 : -1;
-    cur = { w: top.w, x: dir > 0 ? 0 : W - top.w, dir: dir, c: colorFor(n), v: speedFor(n) };
+    cur = { w: top.w, x: dir > 0 ? 0 : W - top.w, dir: dir, c: colorFor(n), tk: coinFor(n).t, v: speedFor(n) };
   }
   function newGame() {
     $("ov").hidden = true;
     try { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); } catch (e) {}
     if (mode === "daily") dailyCfg = { key: dateKey(), no: dayNumber(dateKey()) }; else dailyCfg = null;
     buildSpeeds();
-    blocks = [{ x: (W - BASEW) / 2, w: BASEW, c: colorFor(0) }];
-    falling = []; pops = []; cam = 0; score = 0; perfect = 0; runPerfects = 0; clearedThisRun = false; state = "ready";
+    blocks = [{ x: (W - BASEW) / 2, w: BASEW, c: colorFor(0), tk: coinFor(0).t }];
+    falling = []; pops = []; flashes = []; cam = 0; score = 0; perfect = 0; runPerfects = 0; clearedThisRun = false; state = "ready";
     spawn(); renderHud(); renderMode();
   }
-  function popText(txt, color) { pops.push({ t: txt, life: 0.9, age: 0, c: color || "#fff" }); }
+  function popText(txt, color) { pops.push({ t: txt, life: 0.9, age: 0, c: color || "#fff" }); if (pops.length > 3) pops = pops.slice(-3); }
   function drop() {
     if (state === "over") return;
     if (!cur) return;
@@ -332,7 +356,8 @@ footer { color:var(--muted); font-size:0.8rem; }
     }
     let nx = cur.x, nw = cur.w;
     if (Math.abs(cur.x - top.x) <= PERF) {
-      nx = top.x; perfect++; runPerfects++; stats.perfects++;
+      nx = top.x; perfect++; runPerfects++; stats.perfects++; stats.bestPerf = Math.max(stats.bestPerf || 0, perfect);
+      flashes.push({ x: top.x, y: yw, w: cur.w, age: 0 }); vib(12);
       if (perfect >= 3 && nw < BASEW) { const grow = Math.min(8, BASEW - nw); nw += grow; nx = Math.min(Math.max(0, nx - grow / 2), W - nw); popText("Perfect +" + grow + "px", "#fde68a"); }
       else popText(perfect > 1 ? "Perfect x" + perfect : "Perfect", "#fde68a");
       beep(520 + Math.min(perfect, 8) * 60, 0.12, "triangle", 0.07); beep(780 + Math.min(perfect, 8) * 60, 0.14, "triangle", 0.06, 0.07);
@@ -342,8 +367,13 @@ footer { color:var(--muted); font-size:0.8rem; }
       else falling.push({ x: top.x + top.w, y: yw, w: cur.x + cur.w - (top.x + top.w), vy: 0, c: cur.c, a: 1 });
       nx = left; nw = ov; beep(300, 0.08, "square", 0.04);
     }
-    blocks.push({ x: nx, w: nw, c: cur.c });
+    if ((score + 1) % 5 === 0 && nw < BASEW) {
+      const bonus = Math.min(BASEW * 0.02, BASEW - nw); nw += bonus; nx = Math.min(Math.max(0, nx - bonus / 2), W - nw);
+      popText("Bonus +" + Math.round(bonus) + "px", "#86efac");
+    }
+    blocks.push({ x: nx, w: nw, c: cur.c, tk: cur.tk });
     score++; stats.layers++;
+    { const rk = RANKS.filter(function (r) { return r.at === score; })[0]; if (rk && score > 0) popText("Rank: " + rk.n, "#fbbf24"); }
     if (mode === "daily" && !clearedThisRun && score >= DAILY_TARGET) {
       clearedThisRun = true; const was = daily.last === dateKey(); recordDaily(dailyCfg.key);
       toast(was ? "Daily target reached again!" : "Daily challenge cleared! Streak: " + liveStreak()); renderDaily();
@@ -351,7 +381,7 @@ footer { color:var(--muted); font-size:0.8rem; }
     spawn(); renderHud();
   }
   function gameOver() {
-    state = "over"; overAt = performance.now();
+    state = "over"; overAt = performance.now(); vib(40);
     stats.games++;
     const isBest = mode === "free" && score > best;
     if (isBest) { best = score; lsSet("bs-best", best); }
@@ -359,7 +389,7 @@ footer { color:var(--muted); font-size:0.8rem; }
     $("o-title").textContent = mode === "daily" ? (clearedThisRun ? "Daily cleared" : "Tower fell") : "Tower fell";
     $("o-score").textContent = score;
     $("o-new").hidden = !isBest || score === 0;
-    $("o-text").textContent = score + " layer" + (score === 1 ? "" : "s") + ", " + runPerfects + " perfect drop" + (runPerfects === 1 ? "" : "s") + "." +
+    $("o-text").textContent = score + " layer" + (score === 1 ? "" : "s") + ", " + runPerfects + " perfect drop" + (runPerfects === 1 ? "" : "s") + ". Rank: " + rankFor(score).n + "." +
       (mode === "daily" ? (clearedThisRun ? " Streak: " + liveStreak() + "." : " Reach " + DAILY_TARGET + " to clear today's challenge.") : "");
     $("o-status").textContent = "";
     setTimeout(function () { $("ov").hidden = false; try { $("o-again").focus({ preventScroll: true }); } catch (e) {} }, 650);
@@ -389,11 +419,16 @@ footer { color:var(--muted); font-size:0.8rem; }
     pxScale = pw / W;
   }
   window.addEventListener("resize", fit);
-  function drawBlock(x, y, w, c, a) {
+  function drawBlock(x, y, w, c, a, tk) {
     ctx.globalAlpha = a === undefined ? 1 : a;
     ctx.fillStyle = c; ctx.fillRect(x, y, w, BH - 1);
     ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillRect(x, y, w, 4);
     ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fillRect(x, y + BH - 6, w, 5);
+    if (tk && theme === "coins" && w >= 30) {
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, BH - 1); ctx.clip();
+      ctx.textAlign = "center"; ctx.font = "800 " + (w >= 46 ? 13 : 10) + "px 'JetBrains Mono', monospace";
+      ctx.fillStyle = inkFor(c); ctx.fillText(tk, x + w / 2, y + BH / 2 + 4); ctx.restore();
+    }
     ctx.globalAlpha = 1;
   }
   function render() {
@@ -407,10 +442,15 @@ footer { color:var(--muted); font-size:0.8rem; }
     ctx.fillStyle = "#0a1020"; ctx.fillRect(0, BASEY + BH + cam, W, H);
     for (let i = 0; i < blocks.length; i++) {
       const y = yOf(i) + cam; if (y > H || y < -BH) continue;
-      drawBlock(blocks[i].x, y, blocks[i].w, blocks[i].c);
+      drawBlock(blocks[i].x, y, blocks[i].w, blocks[i].c, 1, blocks[i].tk);
     }
-    if (cur) drawBlock(cur.x, yOf(blocks.length) + cam, cur.w, cur.c);
+    if (cur) drawBlock(cur.x, yOf(blocks.length) + cam, cur.w, cur.c, 1, cur.tk);
     falling.forEach(function (f) { drawBlock(f.x, f.y + cam, f.w, f.c, f.a); });
+    flashes.forEach(function (f) {
+      const k = f.age / 0.4, gr = k * 26;
+      ctx.globalAlpha = Math.max(0, 0.9 * (1 - k)); ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+      ctx.strokeRect(f.x - gr, f.y + cam - gr / 2, f.w + gr * 2, BH + gr); ctx.globalAlpha = 1;
+    });
     ctx.textAlign = "center";
     ctx.font = "800 64px Sora, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillText(String(score), W / 2, 90);
     if (mode === "daily") {
@@ -419,7 +459,7 @@ footer { color:var(--muted); font-size:0.8rem; }
     }
     pops.forEach(function (p, i) {
       ctx.globalAlpha = Math.max(0, 1 - p.age / p.life); ctx.font = "800 20px Sora, sans-serif"; ctx.fillStyle = p.c;
-      ctx.fillText(p.t, W / 2, 160 + i * 0 - p.age * 30); ctx.globalAlpha = 1;
+      ctx.fillText(p.t, W / 2, 160 + i * 24 - p.age * 30); ctx.globalAlpha = 1;
     });
     if (state === "ready") {
       ctx.font = "600 15px Sora, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillText("Tap or press Space to drop", W / 2, H - 22);
@@ -438,6 +478,7 @@ footer { color:var(--muted); font-size:0.8rem; }
     falling.forEach(function (f) { f.vy += 1500 * dt; f.y += f.vy * dt; f.a = Math.max(0, f.a - dt * 0.9); });
     falling = falling.filter(function (f) { return f.a > 0 && f.y + cam < H + 40; });
     pops.forEach(function (p) { p.age += dt; }); pops = pops.filter(function (p) { return p.age < p.life; });
+    flashes.forEach(function (f) { f.age += dt; }); flashes = flashes.filter(function (f) { return f.age < 0.4; });
     render(); requestAnimationFrame(frame);
   }
 
@@ -457,6 +498,7 @@ footer { color:var(--muted); font-size:0.8rem; }
   }
   function renderStats() {
     $("r-best").textContent = best; $("r-games").textContent = stats.games; $("r-layers").textContent = stats.layers; $("r-perf").textContent = stats.perfects;
+    $("r-rank").textContent = rankFor(best).n; $("r-bperf").textContent = stats.bestPerf || 0;
   }
   function renderDaily() {
     const k = dateKey(), done2 = daily.last === k, s = liveStreak();
@@ -494,7 +536,7 @@ footer { color:var(--muted); font-size:0.8rem; }
   function shareUrl() { return location.href.split("#")[0].split("?")[0]; }
   $("o-share").addEventListener("click", function () {
     const head = mode === "daily" ? "Feeless Stack #" + dailyCfg.no : "Feeless Stack";
-    const msg = head + ": my tower reached " + score + " layers. Can you beat it? " + shareUrl();
+    const msg = head + ": my tower reached " + score + " layers (" + rankFor(score).n + "). Can you beat it? " + shareUrl();
     const fallback = function () { copyText(msg, function () { $("o-status").textContent = "Copied. Paste it into a message to challenge a friend."; }, function () { $("o-status").textContent = msg; }); };
     if (navigator.share) { navigator.share({ text: msg }).catch(fallback); return; }
     fallback();

@@ -6,6 +6,10 @@ A free, single-file browser stacking game. Drop the sliding block, land perfect 
 
 - **Drop:** tap, click or press Space to drop the sliding block. Anything that overhangs is cut off. Miss completely and the tower falls.
 - **Perfect drops:** land within a few pixels of the block below and it snaps into place with nothing cut. Three perfects in a row start growing your block back, up to its starting width.
+- **Coins theme (default):** every block is a coin with its ticker and colour (XNO, BTC, ETH, LTC, XMR, SOL, ADA, DOGE, XRP, BNB, DOT, TRX, repeating). Other themes are plain colours.
+- **Ranks:** Paper Hands, Hodler (10 layers), Diamond Hands (20), Whale (30), Satoshi (45), with pop-ups as you climb.
+- **Feedback:** a ring flash on perfect drops and a short vibration on phones that support it.
+- **Bonus growth:** every 5th layer the block grows back by about 2% of the starting width, up to the starting width, whether or not the drop was perfect.
 - **Speed:** blocks slide faster as the tower grows.
 - **Daily challenge:** the same speeds for everyone, new every day at 00:00 UTC. Reach 30 layers to clear it and keep your daily streak.
 - **Free play:** your best tower is stored per device.
